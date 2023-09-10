@@ -7,7 +7,6 @@ aiohttp
 parsel
 requests
 logger
-logging
 os
 fcntl
 asyncio
