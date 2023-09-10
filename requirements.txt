@@ -6,12 +6,6 @@ psycopg-pool
 aiohttp
 parsel
 requests
-os
-fcntl
 asyncio
-datetime
-pytz
 requests
-re
 urllib3
-bs4
