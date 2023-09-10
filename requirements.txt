@@ -6,7 +6,6 @@ psycopg-pool
 aiohttp
 parsel
 requests
-logger
 os
 fcntl
 asyncio
