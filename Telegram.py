@@ -10,7 +10,7 @@ from DB import (create_connection_pool, open_pool, readQuery, addUserDB,
                 addLogDB, setTrackingDB, getProductsDB, addProductDB,
                 untrackProductDB, showLogsDB, refresh_connection_pool)
 from scrapping import master_scrapper
-import logging
+# import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardMarkup
 from telegram.ext import (filters, MessageHandler, ApplicationBuilder,
                           CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -24,8 +24,8 @@ tele_token = os.environ['telegram_token']
 conn = create_connection_pool()
 # conn=refresh_connection_pool(conn)
 
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
+# log = logging.getLogger('werkzeug')
+# log.setLevel(logging.ERROR)
 
 start_time = time()
 '''
