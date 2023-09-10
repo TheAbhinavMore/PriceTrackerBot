@@ -7,10 +7,11 @@ from time import time
 import asyncio
 from utilities import cleanLink, getSite, supported_sites
 from DB import (create_connection_pool, open_pool, readQuery, addUserDB,
-                addLogDB, setTrackingDB, getProductsDB, addProductDB,
-                untrackProductDB, showLogsDB, refresh_connection_pool)
+                addLogDB, setTrackingDB, getProductsDB, writeQuery,
+                addProductDB, untrackProductDB, showLogsDB,
+                refresh_connection_pool)
 from scrapping import master_scrapper
-# import logging
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardMarkup
 from telegram.ext import (filters, MessageHandler, ApplicationBuilder,
                           CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -19,13 +20,13 @@ from telegram.ext import (filters, MessageHandler, ApplicationBuilder,
 # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 tele_token = os.environ['telegram_token']
+webhook_url = 'https://api.render.com/deploy/srv-cjv1g7l175es73cdabsg?key=Xi6JuLbTWrQ'
 
 # Create and nitialize the connection pool
 conn = create_connection_pool()
-# conn=refresh_connection_pool(conn)
 
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.ERROR)
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 start_time = time()
 '''
@@ -33,6 +34,29 @@ Telegram Handles
 '''
 # to check keep track of open commands and products.
 userData = dict()
+
+
+# global function to refresh connection pool periodically
+async def pool_checker():
+  global conn
+  while True:
+    try:
+      response = await readQuery(conn, 'SELECT 1;')
+      # old pool is responsive
+      if response:
+        await asyncio.sleep(20 * 60)  # Sleep 20 Min
+        continue
+    except:
+      conn = create_connection_pool()
+    await open_pool(conn)
+    await asyncio.sleep(1200)
+
+
+#open pool
+asyncio.get_event_loop().run_until_complete(open_pool(conn))
+# Create an event loop and run the pool_checker in it
+loop = asyncio.get_event_loop()
+loop.create_task(pool_checker())
 
 
 # global func to send msg
@@ -57,12 +81,12 @@ async def sendMessage(msg,
 
   if chat_id:
     return await context.bot.send_message(
-        chat_id=chat_id,
-        text=msg,
-        parse_mode=parse_mode,
-        reply_to_message_id=reply_id,
-        reply_markup=reply_markup,
-        disable_web_page_preview=not web_preview)
+      chat_id=chat_id,
+      text=msg,
+      parse_mode=parse_mode,
+      reply_to_message_id=reply_id,
+      reply_markup=reply_markup,
+      disable_web_page_preview=not web_preview)
 
 
 # function to format product retrieved
@@ -74,9 +98,9 @@ async def productFetchSuccess(update, context, title, price, url):
     msg += f'☛ <a href="{url}"><b>{title.strip()}</b></a>\n\n❖Current Price - <b>{price}</b> ₹\n'
   await sendMessage(msg, update, context, parse_mode='HTML')
   await trackProducts(update, context, {
-      "name": title,
-      'price': price,
-      'url': url
+    "name": title,
+    'price': price,
+    'url': url
   }, 'add_product')
 
 
@@ -161,7 +185,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Sharing = Caring!\n\nThis bot is a solo effort, not affiliated with anyone else. Your shares go a long way in making this project meaningful.\n\nYour support is what makes it all worthwhile. 🌐💙"
     share_msg = "\n\nNever overpay again! Let this bot monitor product prices and notify you of drops.\n\nElevate your online shopping game today! 🛒\n\n https://telegram.me/PriceAlertAB9Bot"
     keyboard = [[
-        InlineKeyboardButton("Share Bot", switch_inline_query=share_msg)
+      InlineKeyboardButton("Share Bot", switch_inline_query=share_msg)
     ]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await sendMessage(msg, update, context, reply_markup=reply_markup)
@@ -174,7 +198,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
   # check for pending target set
   openProduct = context.user_data.get('openProduct', None)
 
-  try:
+  if text.isdecimal():
     target = float(text)
     if openProduct:
       # pass message id of tracking message as context
@@ -192,7 +216,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return
 
-  except:
+  else:
     # also check for open feedback (refer line 440)
     # add check to see if user is logged in db
     user_id = message.from_user.id
@@ -204,11 +228,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if openProduct:
       # double check if any product requires price target
-      msg = '*Please set valid target price! *⚠️\n----------\n'
+      msg = '*This product is missing the target price! *⚠️\n----------\n'
       msg += f'❖*{openProduct["name"][:70]}*...\n'
-      price = openProduct["price"]
-      msg += f'❖Price:*{price if price!=999999.0 else "OUT OF STOCK"}* ₹\n\n'
-      msg += '_Tip: Enter the desired price as a number (ex.12345) without any currency symbols or special characters:_\n\n'
+      msg += f'❖Price:*{openProduct["price"]}* ₹\n\n'
+      msg += '_Tip: Enter the desired price as a number (e.g., 210 ) without any currency symbols or special characters:_\n\n'
       await sendMessage(msg, update, context)
       return
 
@@ -253,8 +276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
   # if user sent link
   if url:
     sent_message = await sendMessage(
-        "_Hold on, I'm trying to fetch the product..._🔍", update, context,
-        True)
+      "_Hold on, I'm trying to fetch the product..._🔍", update, context, True)
     await context.bot.send_chat_action(chat_id, 'typing')
     # log message
     await addLogDB(conn, chat_id, 'link')
@@ -263,10 +285,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
       if getSite(url) is None:
         keyboard = [[
-            InlineKeyboardButton("Supported Sites",
-                                 callback_data="supported_sites"),
-            InlineKeyboardButton("Request Support",
-                                 callback_data="request_site"),
+          InlineKeyboardButton("Supported Sites",
+                               callback_data="supported_sites"),
+          InlineKeyboardButton("Request Support",
+                               callback_data="request_site"),
         ]]
         await sendMessage("*Sorry, but that's an unsupported site!* 😅",
                           update,
@@ -276,8 +298,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
       product_data = await master_scrapper(url)
       title, price = product_data['title'], product_data['price']
 
-    except Exception as e:
-      print(e)
+    except:
       await sendMessage("*Please try again with valid link! *😳", update,
                         context)
       return
@@ -324,13 +345,12 @@ async def try_harder_button_callback(update, context):
 
   url = context.chat_data.get('url', None)
   if url is None:
-
     return
 
   sent_msg = await query.edit_message_text(
-      text=
-      "_Okay, trying harder this time to fetch the product..._🔍\n\n*Wait for few seconds...*",
-      parse_mode='Markdown')
+    text=
+    "_Okay, trying harder this time to fetch the product..._🔍\n\n*Wait for few seconds...*",
+    parse_mode='Markdown')
   await context.bot.send_chat_action(chat_id, 'typing')
   await asyncio.sleep(5)
   await context.bot.send_chat_action(chat_id, 'typing')
@@ -347,9 +367,9 @@ async def try_harder_button_callback(update, context):
   else:
     # check site is amazon for extra fallback msg
     if getSite(url)[0] == 'amazon':
-      msg = "Amazon products might sometimes be tricky to fetch. Give it a moment, then attempt once more.😵"
+      msg = "Amazon products might sometimes be tricky to fetch. Give it a moment, then attempt once more.😔"
     else:
-      msg = "*I'm sorry, but still I wasn't able to retrieve any product.* 😵\n\nCheck whether product URL is correct else try again in 15-20 seconds."
+      msg = "*I'm sorry, but still I wasn't able to retrieve any product.* 😔\n\nCheck whether product URL is correct else try again in 15-20 seconds."
 
     inline_button = InlineKeyboardButton(text="Send Feedback",
                                          callback_data='feedback')
@@ -362,7 +382,10 @@ async def try_harder_button_callback(update, context):
 
 async def trackProducts(update, context, msg, act):
 
-  chat_id = update.message.chat_id
+  if update.message is None:
+    chat_id = update.callback_query.message.chat_id
+  else:
+    chat_id = update.message.chat_id
 
   # get user tracking list
   products = await getProductsDB(conn, chat_id)
@@ -372,7 +395,7 @@ async def trackProducts(update, context, msg, act):
       p_id = products[msg['url']]['product_id']
       response = f"_Hey I'm already tracking this product!_🤔\n---------------\n❖Current Target - *{products[msg['url']]['target']}* ₹\n\n●*Steps to update target price:*\n   -Untrack Product\n   -Send link again.🤗"
       inline_button = InlineKeyboardButton(
-          'Untrack Product ❎', callback_data=f'stop_tracking_{p_id}')
+        'Untrack Product ❎', callback_data=f'stop_tracking_{p_id}')
       inline_markup = InlineKeyboardMarkup([[inline_button]])
       await sendMessage(response, update, context, reply_markup=inline_markup)
       return
@@ -455,17 +478,15 @@ async def send_product_details(update,
              f'┉┉┉┉┉┉┉┉┉┉┉┉┉┉')
 
   keyboard = [[
-      InlineKeyboardButton(f"Buy Now ✅", url=url),
-      InlineKeyboardButton(
-          "Stop Tracking ⏹",
-          callback_data=f"stop_tracking_{value['product_id']}"),
+    InlineKeyboardButton(f"Buy Now ✅", url=url),
+    InlineKeyboardButton("Stop Tracking ⏹",
+                         callback_data=f"stop_tracking_{value['product_id']}"),
   ]]
   if end:
     keyboard += [[
-        InlineKeyboardButton(
-            "Price History 📊",
-            url=
-            f"https://pricehistory.abhinav35.repl.co/price-history/{chat_id}")
+      InlineKeyboardButton(
+        "Price History 📊",
+        url=f"https://pricehistory.abhinav35.repl.co/price-history/{chat_id}")
     ], [InlineKeyboardButton("Hide List 🙈", callback_data='hide_messages')]]
 
   return await sendMessage(details,
@@ -488,8 +509,8 @@ async def showList(update, context, products):
   if 0 < time_since_last_use < 30:
     remaining_time = 30 - time_since_last_use
     await context.bot.send_message(
-        chat_id,
-        f"Please wait {remaining_time:.0f} seconds before using that command again. ⏳"
+      chat_id,
+      f"Please wait {remaining_time:.0f} seconds before using that command again. ⏳"
     )
     return
 
@@ -500,7 +521,7 @@ async def showList(update, context, products):
     products = await getProductsDB(conn, chat_id)
 
   if len(products) == 0:
-    response = "_NO PRODUCT TRACKING ACTIVE_🤔\n\n*TO TRACK PRODUCT JUST SHARE ANY PRODUCT URL*😃\n\n➖➖➖➖➖"
+    response = "_NO PRODUCT TRACKING ACTIVE_🤔\n\n*TO TRACK PRODUCT JUST SHARE ANY PRODUCT LINK*😃\n\n➖➖➖➖➖"
     inline_button = InlineKeyboardButton(text="Add Product 🛒",
                                          callback_data='feedback')
     reply_markup = InlineKeyboardMarkup([[inline_button]])
@@ -556,14 +577,13 @@ async def showChart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
 
   keyboard = [[
-      InlineKeyboardButton(
-          "Show Price History 📈",
-          url=f"https://pricehistory.abhinav35.repl.co/price-history/{chat_id}"
-      )
+    InlineKeyboardButton(
+      "Show Price History 📈",
+      url=f"https://pricehistory.abhinav35.repl.co/price-history/{chat_id}")
   ]]
 
   chart_message = (
-      '*Explore Your Price History!*\n ➖➖➖➖➖\n\n_Dive into the comprehensive price history for all your tracked products in one convenient location!_'
+    '*Explore Your Price History!*\n ➖➖➖➖➖\n\n_Dive into the comprehensive price history for all your tracked products in one convenient location!_'
   )
   await sendMessage(chart_message,
                     update,
@@ -580,10 +600,22 @@ async def notifyMe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
   await sendMessage("*TELEGRAM BOT IS UP & ACTIVE*☑️\n➖➖➖➖", update, context)
+
+  query = '''
+    SELECT TO_CHAR(timestamp, 'DD Mon, HH24:MI') AS formatted_time
+    FROM price_change_log
+    WHERE product_id=99999
+    LIMIT 1;
+    '''
+  last_price_update = await readQuery(conn, query)
+  await sendMessage(f"*Last Price Log*: {last_price_update[0][0]}", update,
+                    context)
+
   response = "_Hold on, you'll get test notification here soon..._😇"
   await sendMessage(response, update, context)
   # add test notification product
-  await setTrackingDB(conn, 677440016, 'test', 99999)
+  await writeQuery(
+    conn, 'update price_change_log set alerted=false where product_id=99999;')
 
 
 async def showLogs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -595,8 +627,8 @@ async def showLogs(update: Update, context: ContextTypes.DEFAULT_TYPE):
   msg = '➽*Bot Summary*'
   await sendMessage(msg, update, context)
   await sendMessage(
-      f"Price Bot Up since *{round((time() - start_time) / 3600, 1)}* Hours! 🕘",
-      update, context)
+    f"Price Bot Up since *{round((time() - start_time) / 3600, 1)}* Hours! 🕘",
+    update, context)
 
   DBlogs = await showLogsDB(conn)
   if not DBlogs:
@@ -639,7 +671,9 @@ Remember, the bot requires you to use  /start command at least once anywhere.
 Happy shopping and saving money with Price Alert Bot! 🛍️
 '''
   keyboard = [[
-      InlineKeyboardButton("Show Bot Menu", callback_data="show_menu_help"),
+    InlineKeyboardButton("Supported Sites", callback_data="supported_sites")
+  ], [
+    InlineKeyboardButton("Show Bot Menu", callback_data="show_menu_help"),
   ]]
   await sendMessage(help_msg,
                     update,
@@ -745,7 +779,7 @@ Add a new product to track.
 Stop tracking a product.
 ● /chart, /history, /graph :
 Show price history chart.
-● /tutorial, /help, /sites:
+● /tutorial, /help:
 Get help and information.
 
 Use these commands to interact with the bot and manage your tracked products. Enjoy! 😊
@@ -761,45 +795,46 @@ async def error_handler(update, context):
   # Print the error message
   print(error_message)
   conn = await refresh_connection_pool(conn)
+  await open_pool(conn)
   # send user message
-  inline_button = InlineKeyboardButton('Alert Admin',
+  inline_button = InlineKeyboardButton('Having Troubles?',
                                        callback_data='alert_admin')
   inline_markup = InlineKeyboardMarkup([[inline_button]])
-  response = "🤖 Sorry for the inconvenience! It seems I'm currently experiencing heavy load. Could you please try your request again in a few seconds? Thank you for your patience! 🕒"
+  response = "🤖 Sorry, Something went wrong. Could you please try that again in a few seconds? Thank you for your patience! 🕒"
   await sendMessage(response, update, context, reply_markup=inline_markup)
 
 
 def get_menu_keyboard(show_more=True):
   if show_more:
     keyboard = [[
-        InlineKeyboardButton("Add a Product 🛒", callback_data="add_product"),
-        InlineKeyboardButton("Active Tracking 🛍",
-                             callback_data="active_tracking"),
+      InlineKeyboardButton("Add a Product 🛒", callback_data="add_product"),
+      InlineKeyboardButton("Active Tracking 🛍",
+                           callback_data="active_tracking"),
     ],
                 [
-                    InlineKeyboardButton("Price History 📈",
-                                         callback_data="price_history"),
-                    InlineKeyboardButton("Hide Menu 🙈",
-                                         callback_data="hide_menu")
+                  InlineKeyboardButton("Price History 📈",
+                                       callback_data="price_history"),
+                  InlineKeyboardButton("Hide Menu 🙈",
+                                       callback_data="hide_menu")
                 ],
                 [
-                    InlineKeyboardButton("Show More ➡️",
-                                         callback_data="show_more")
+                  InlineKeyboardButton("Show More ➡️",
+                                       callback_data="show_more")
                 ]]
   else:
     keyboard = [[
-        InlineKeyboardButton("Stop Tracking 🚫", callback_data="stop_tracking"),
-        InlineKeyboardButton("Request Site 📝", callback_data="request_site"),
+      InlineKeyboardButton("Stop Tracking 🚫", callback_data="stop_tracking"),
+      InlineKeyboardButton("Request Site 📝", callback_data="request_site"),
     ],
                 [
-                    InlineKeyboardButton("Send Feedback 🙌",
-                                         callback_data="feedback"),
-                    InlineKeyboardButton("Hide Menu 🙈",
-                                         callback_data="hide_menu")
+                  InlineKeyboardButton("Send Feedback 🙌",
+                                       callback_data="feedback"),
+                  InlineKeyboardButton("Hide Menu 🙈",
+                                       callback_data="hide_menu")
                 ],
                 [
-                    InlineKeyboardButton("Main Menu 🔙",
-                                         callback_data="main_menu")
+                  InlineKeyboardButton("Main Menu 🔙",
+                                       callback_data="main_menu")
                 ]]
 
   return InlineKeyboardMarkup(keyboard)
@@ -897,9 +932,45 @@ async def button_click(update: Update, context: CallbackContext):
       await query.message.edit_reply_markup(get_menu_keyboard())
 
     elif option == 'supported_sites':
-      site_msg = "🛍️ Available sites supported 🛍️\n\n• " + \
-          "\n• ".join(supported_sites)
-      await query.message.reply_text(site_msg)
+      site_msg = "🛍️ Available sites supported 🛍️"
+      keyboard = InlineKeyboardMarkup(
+        [[
+          InlineKeyboardButton("General 🌐", callback_data="general_sites"),
+          InlineKeyboardButton("Fashion 👗", callback_data="fashion_sites"),
+        ],
+         [
+           InlineKeyboardButton("Pharmacy 💊", callback_data="pharmacy_sites"),
+           InlineKeyboardButton("Electronics 🖥",
+                                callback_data="electronics_sites"),
+         ]])
+      await query.message.reply_text(site_msg, reply_markup=keyboard)
+
+    elif option == 'general_sites':
+      general_sites = ['• Amazon', '• Flipkart', '• Snapdeal']
+      msg = '𝗦𝘂𝗽𝗽𝗼𝗿𝘁𝗲𝗱 𝗦𝘁𝗼𝗿𝗲𝘀 🌐\n\n'
+      msg += '\n'.join(general_sites)
+      await query.message.reply_text(msg)
+
+    elif option == 'fashion_sites':
+      general_sites = ['• Ajio', '• Nykaa', '• Bewakoof']
+      msg = '𝗦𝘂𝗽𝗽𝗼𝗿𝘁𝗲𝗱 𝗦𝘁𝗼𝗿𝗲𝘀 👗\n\n'
+      msg += '\n'.join(general_sites)
+      await query.message.reply_text(msg)
+
+    elif option == 'pharmacy_sites':
+      general_sites = ['• 1mg', '• Netmeds']
+      msg = '𝗦𝘂𝗽𝗽𝗼𝗿𝘁𝗲𝗱 𝗦𝘁𝗼𝗿𝗲𝘀 💊\n\n'
+      msg += '\n'.join(general_sites)
+      await query.message.reply_text(msg)
+
+    elif option == 'electronics_sites':
+      general_sites = [
+        '• MD-Computers', '• EZPZSolutions', '• TPStech', '• PC-Studio',
+        '• Primeabgb', '• Vedant-computers'
+      ]
+      msg = '𝗦𝘂𝗽𝗽𝗼𝗿𝘁𝗲𝗱 𝗦𝘁𝗼𝗿𝗲𝘀 🖥\n\n'
+      msg += '\n'.join(general_sites)
+      await query.message.reply_text(msg)
 
     elif option == "feedback":
       response = "Hey there! 👋\nGot something on your mind? We'd love to hear it!\n\nGo ahead, share your thoughts!"
@@ -949,10 +1020,8 @@ async def button_click(update: Update, context: CallbackContext):
 
 def start_bot():
   application = ApplicationBuilder().token(tele_token).build()
-  # asyncio.get_event_loop().run_until_complete(
-  #     application.bot.setWebhook(url=webhook_url))
-
-  asyncio.get_event_loop().run_until_complete(open_pool(conn))
+  asyncio.get_event_loop().run_until_complete(
+    application.bot.setWebhook(url=webhook_url))
 
   # start command handler
   start_handler = CommandHandler(['start', 'hello', 'hi'], start)
@@ -965,14 +1034,14 @@ def start_bot():
   # list command handler
   list_commands = ['list', 'track', 'add']
   list_handler = CommandHandler(
-      list_commands, lambda update, context: showList(update, context, True))
+    list_commands, lambda update, context: showList(update, context, True))
   application.add_handler(list_handler)
 
   # untrack command handler
   untrack_commands = ['untrack', 'stop']
   untrack_handler = CommandHandler(
-      untrack_commands,
-      lambda update, context: untrackProduct(update, context, {}, None))
+    untrack_commands,
+    lambda update, context: untrackProduct(update, context, {}, None))
   application.add_handler(untrack_handler)
 
   # price history command handler
@@ -985,7 +1054,7 @@ def start_bot():
   application.add_handler(notification_handler)
 
   # help command handler
-  help_handler = CommandHandler(['tutorial', 'help', 'sites'], help)
+  help_handler = CommandHandler(['tutorial', 'help'], help)
   application.add_handler(help_handler)
 
   # broadcast command handler
@@ -998,7 +1067,7 @@ def start_bot():
 
   # try harder button handler
   application.add_handler(
-      CallbackQueryHandler(try_harder_button_callback, pattern='try_harder'))
+    CallbackQueryHandler(try_harder_button_callback, pattern='try_harder'))
 
   application.add_handler(CallbackQueryHandler(button_click))
 
