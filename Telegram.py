@@ -11,7 +11,6 @@ from DB import (create_connection_pool, open_pool, readQuery, addUserDB,
                 addProductDB, untrackProductDB, showLogsDB,
                 refresh_connection_pool)
 from scrapping import master_scrapper
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardMarkup
 from telegram.ext import (filters, MessageHandler, ApplicationBuilder,
                           CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -20,13 +19,13 @@ from telegram.ext import (filters, MessageHandler, ApplicationBuilder,
 # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 tele_token = os.environ['telegram_token']
-webhook_url = 'https://api.render.com/deploy/srv-cjv1g7l175es73cdabsg?key=Xi6JuLbTWrQ'
+webhook_url = 'https://price-tracker-bot-t1yv.onrender.com'
 
 # Create and nitialize the connection pool
 conn = create_connection_pool()
 
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
+# log = logging.getLogger('werkzeug')
+# log.setLevel(logging.ERROR)
 
 start_time = time()
 '''
