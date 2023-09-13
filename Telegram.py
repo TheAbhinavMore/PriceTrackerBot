@@ -1019,8 +1019,7 @@ async def button_click(update: Update, context: CallbackContext):
 
 def start_bot():
   application = ApplicationBuilder().token(tele_token).build()
-  asyncio.get_event_loop().run_until_complete(
-    application.bot.setWebhook(url=webhook_url))
+  #asyncio.get_event_loop().run_until_complete(application.bot.setWebhook(url=webhook_url))
 
   # start command handler
   start_handler = CommandHandler(['start', 'hello', 'hi'], start)
